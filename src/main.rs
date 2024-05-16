@@ -1,20 +1,23 @@
 use std::{
     fs::{self, DirEntry},
     path::{Path, PathBuf},
+    thread,
+    time::Duration,
 };
 
 use cursive::{
     align::Align,
-    backends::crossterm::crossterm::event,
+    event::{Event, Key},
     theme::{Color, Palette, Theme},
     traits::*,
-    views::{Button, Dialog, ListView, TextArea, TextContent, TextContentRef, TextView},
+    views::{Button, Dialog, ListView, TextArea, TextContent, TextView},
     Cursive, XY,
 };
+use spinoff::{spinners, Spinner};
 
 struct ExplorerPage<'a> {
     /// Creates Page which lists contents of following Path
-    path: PathBuf,
+    path: &'a PathBuf,
     /// required to create page
     runnable: &'a mut Cursive,
 }
@@ -27,10 +30,8 @@ impl ExplorerPage<'_> {
 
         let mut files: Vec<fs::DirEntry> = Vec::new();
 
-        self.runnable.set_global_callback(
-            cursive::event::Event::Key(cursive::event::Key::Backspace),
-            |a| go_back(a),
-        );
+        self.runnable
+            .set_global_callback(cursive::event::Event::Key(Key::Backspace), |a| go_back(a));
         self.runnable
             .set_global_callback(cursive::event::Event::Char('h'), |a| help_screen(a));
         self.runnable
@@ -58,25 +59,39 @@ impl ExplorerPage<'_> {
                 .button("Search", |a| search_screen(a))
                 .content(
                     ListView::new()
-                        .with(|list| {
+                        .with(|list: &mut ListView| {
                             for entry in directories {
+                                // match list.on_event(cursive::event::Event::Char('d')) {
+                                //     cursive::event::EventResult::Ignored => (),
+                                //     cursive::event::EventResult::Consumed(_) => {
+                                //         user_create_new_dir(&entry.path(), list)
+                                //     }
+                                // }
+
                                 list.add_child(
                                     return_file_type_as_str(&entry),
                                     Button::new(
                                         format!("{}", entry.path().display()),
                                         move |mut action| {
                                             ExplorerPage {
-                                                path: entry.path(),
+                                                path: &entry.path(),
                                                 runnable: &mut action,
                                             }
                                             .new()
                                         },
                                     ),
-                                )
+                                );
                             }
                         })
                         .with(|list| {
                             for entry in files {
+                                // match list.on_event(cursive::event::Event::Char('d')) {
+                                //     cursive::event::EventResult::Ignored => (),
+                                //     cursive::event::EventResult::Consumed(_) => {
+                                //         user_create_new_dir(&entry.path(), list)
+                                //     }
+                                // }
+
                                 list.add_child(
                                     return_file_type_as_str(&entry),
                                     Button::new(
@@ -86,7 +101,7 @@ impl ExplorerPage<'_> {
                                 )
                             }
                             if self.runnable.screen().layer_sizes().len() >= 1 {
-                                list.add_child("", Button::new("->Go Back<-", |s| go_back(s)))
+                                list.add_child("", Button::new("- Go Back -", |s| go_back(s)))
                             }
                         })
                         .scrollable()
@@ -101,17 +116,48 @@ impl ExplorerPage<'_> {
     }
 }
 
+fn _user_create_new_dir(path: &PathBuf, s: &mut Cursive) {
+    let mut user_input: String = String::new();
+    let text_area = TextArea::new().with_name("text_area");
+
+    s.add_layer(
+        Dialog::new()
+            .title(format!(
+                "Create new Dir at {:?}",
+                path.as_path().components().last().unwrap().as_os_str(),
+            ))
+            .content(text_area)
+            .fixed_size(XY { x: 10, y: 20 }),
+    );
+
+    // match s.on_event(cursive::event::Event::Key(cursive::event::Key::Enter)) {
+    //     cursive::event::EventResult::Ignored => (),
+    //     cursive::event::EventResult::Consumed(_) => s
+    //         .call_on_name("text_area", |view: &mut views::TextArea| {
+    //             user_input.push_str(view.get_content())
+    //         })
+    //         .unwrap(),
+    // }
+
+    s.set_global_callback(Event::Key(Key::Enter), move |s| {
+        s.call_on_name("text_area", |view: &mut TextArea| {
+            user_input.push_str(view.get_content())
+        })
+        .unwrap();
+    });
+}
+
 fn search_screen(s: &mut Cursive) {
-    let user_input = TextContent::new(String::from(""));
-    let text_area = TextArea::new()
-        .content(user_input.get_content().source())
-        .with_name("text_area");
+    let text_area = TextArea::new();
+    let user_input = TextContent::new(text_area.get_content());
 
     s.add_layer(
         Dialog::new()
             .title("Search")
             .content(text_area)
-            .button(format!("{}", 3), |s| {}),
+            .button(format!("{:?}", user_input.get_content().source()), |s| {
+                s.quit()
+            }),
     );
 }
 
@@ -137,7 +183,7 @@ fn help_dialog() -> String {
     format!("Press <> to create new File \nPress <> to create new Folder \nPress <s> to Search \nPress <q> to exit program \nPress <h> to open Help")
 }
 
-fn return_file_type_as_str(entry: &DirEntry) -> &'static str {
+pub(crate) fn return_file_type_as_str(entry: &DirEntry) -> &'static str {
     match entry {
         entry if entry.file_type().unwrap().is_file() => "--- File",
         entry if entry.file_type().unwrap().is_dir() => "--- Directory",
@@ -170,10 +216,18 @@ fn main() {
     });
 
     ExplorerPage {
-        path,
+        path: &path,
         runnable: &mut siv,
     }
     .new();
+
+    let mut spinner = Spinner::new(
+        spinners::Balloon,
+        "Opening Directories..",
+        spinoff::Color::Green,
+    );
+    thread::sleep(Duration::from_secs(3));
+    spinner.success("Opening");
 
     siv.run();
 }
